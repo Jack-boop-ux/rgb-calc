@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RGB平均值代入计算</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; padding: 16px; line-height: 1.4; }
+    .row { margin: 12px 0; }
+    button { padding: 10px 14px; border-radius: 8px; border: 1px solid #ccc; background: #fff; }
+    input[type="text"], textarea {
+      width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #ddd; font-size: 14px;
+    }
+    pre { background: #f6f6f6; padding: 12px; border-radius: 8px; overflow: auto; }
+    img { max-width: 100%; margin-top: 10px; display: none; border-radius: 10px; }
+    .small { color: #666; font-size: 12px; }
+    .grid { display: grid; gap: 8px; }
+    .pill {
+      display: inline-block; padding: 4px 8px; border-radius: 999px;
+      background: #f0f0f0; font-size: 12px; color: #333;
+    }
+    .error { color: #b00020; }
+    .ok { color: #0a7a2f; }
+  </style>
+</head>
+<body>
+  <h2>全图平均 RGB → 代入算式计算</h2>
+
+  <div class="row">
+    <div class="pill">输入：纯色图片（全图平均RGB）</div>
+  </div>
+
+  <div class="row">
+    <div>1）选择图片</div>
+    <input type="file" accept="image/*" id="file" />
+  </div>
+
+  <div class="row">
+    <div>2）公式输入框（使用 R、G、B 表示平均值）</div>
+    <div class="small">
+      例如：<code>(R+G+B)/3</code> 或 <code>(R-G)/(R+G+B)</code>。支持 <code>+ - * / ( )</code>，
+      也支持 <code>Math.abs</code>、<code>Math.sqrt</code>、<code>Math.log</code>（如需要）。
+    </div>
+    <input type="text" id="formula" value="(R+G+B)/3" />
+  </div>
+
+  <div class="row">
+    <button id="btn">计算并代入算式</button>
+  </div>
+
+  <div class="row grid">
+    <div>平均 RGB：</div>
+    <div id="rgb">R=—, G=—, B=—</div>
+
+    <div>最终数值：</div>
+    <div id="out">—</div>
+    <div id="msg" class=""></div>
+  </div>
+
+  <img id="preview" />
+
+<script>
+  const fileEl = document.getElementById('file');
+  const btn = document.getElementById('btn');
+  const preview = document.getElementById('preview');
+  const rgbEl = document.getElementById('rgb');
+  const outEl = document.getElementById('out');
+  const msgEl = document.getElementById('msg');
+  const formulaEl = document.getElementById('formula');
+
+  let currentImage = null;
+
+  fileEl.addEventListener('change', () => {
+    const f = fileEl.files && fileEl.files[0];
+    if (!f) return;
+
+    const url = URL.createObjectURL(f);
+    const img = new Image();
+    img.onload = () => {
+      currentImage = img;
+      preview.src = url;
+      preview.style.display = 'block';
+      rgbEl.textContent = 'R=—, G=—, B=—';
+      outEl.textContent = '—';
+      msgEl.textContent = '';
+    };
+    img.src = url;
+  });
+
+  function computeAvgRGB(img) {
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth || img.width;
+    canvas.height = img.naturalHeight || img.height;
+
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0);
+
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+
+    let sumR = 0, sumG = 0, sumB = 0, count = 0;
+
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      const a = data[i + 3];
+
+      if (a > 0) { // 更稳妥：避免全透明像素干扰
+        sumR += r; sumG += g; sumB += b; count++;
+      }
+    }
+
+    // 防止极端情况 count=0
+    if (count === 0) return { avgR: 0, avgG: 0, avgB: 0 };
+
+    return {
+      avgR: sumR / count,
+      avgG: sumG / count,
+      avgB: sumB / count
+    };
+  }
+
+  function safeEvalFormula(expr, vars) {
+    // 让你能用 Math.xxx，同时只暴露 R,G,B 给公式
+    const { R, G, B } = vars;
+
+    // 用 Function 构建计算：避免全局污染
+    // 注意：用户输入公式可能有风险；这里我们限制只提供 Math + R/G/B
+    const fn = new Function('R', 'G', 'B', 'Math', `return (${expr});`);
+    return fn(R, G, B, Math);
+  }
+
+  btn.addEventListener('click', () => {
+    msgEl.textContent = '';
+    msgEl.className = '';
+
+    if (!currentImage) {
+      alert('请先选择图片');
+      return;
+    }
+
+    const formula = (formulaEl.value || '').trim();
+    if (!formula) {
+      alert('请先输入公式');
+      return;
+    }
+
+    const { avgR, avgG, avgB } = computeAvgRGB(currentImage);
+    rgbEl.textContent = `R=${avgR.toFixed(2)}, G=${avgG.toFixed(2)}, B=${avgB.toFixed(2)}`;
+
+    try {
+      const result = safeEvalFormula(formula, { R: avgR, G: avgG, B: avgB });
+
+      if (typeof result !== 'number' || !isFinite(result)) {
+        outEl.textContent = '结果无效（可能出现除0/对数负数等）';
+        msgEl.textContent = '请检查公式是否有分母为0等情况。';
+        msgEl.className = 'error';
+        return;
+      }
+
+      // 默认保留两位小数，你也可以让我改成别的位数
+      outEl.textContent = result.toFixed(4);
+
+      msgEl.textContent = '计算成功';
+      msgEl.className = 'ok';
+    } catch (e) {
+      outEl.textContent = '—';
+      msgEl.textContent = '公式解析失败：请检查语法（例如是否少了括号、是否写错 R/G/B）。';
+      msgEl.className = 'error';
+    }
+  });
+</script>
+</body>
+</html>
